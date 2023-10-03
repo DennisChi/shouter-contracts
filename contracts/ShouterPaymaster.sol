@@ -9,8 +9,11 @@ import "@opengsn/contracts/src/utils/GsnTypes.sol";
 
 contract ShouterPaymaster is BasePaymaster, IShouterPaymasterErros {
     bytes4 targetMethodSig = bytes4(keccak256(bytes("commitComment(string)")));
+    address targetContract;
 
-    constructor() {}
+    constructor(address targetContractAddr) {
+        targetContract = targetContractAddr;
+    }
 
     function versionPaymaster() external pure override returns (string memory) {
         return "v1";
@@ -33,6 +36,9 @@ contract ShouterPaymaster is BasePaymaster, IShouterPaymasterErros {
             (bytes4(data[3]) << 24);
         if (methodSig != targetMethodSig) {
             revert OnlyCommitCommentCanBeCalled();
+        }
+        if (targetContract != request.to) {
+            revert NotTargetContract();
         }
 
         return ("", false);
