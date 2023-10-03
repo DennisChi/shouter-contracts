@@ -4,13 +4,17 @@ pragma solidity ^0.8.19;
 import "./interfaces/IShouter.sol";
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
+import "@opengsn/contracts/src/ERC2771Recipient.sol";
+import "@opengsn/contracts/src/interfaces/IRelayHub.sol";
 
-contract Shouter is ERC721, IShouter {
+contract Shouter is ERC721, ERC2771Recipient, IShouter {
     using Counters for Counters.Counter;
 
     uint256 balanceThreshold;
     Counters.Counter tokenIdCounter;
     address payable balanceCollector;
+    IRelayHub relayHub;
+    address paymaster;
 
     /**
      * @dev `tokenId` => `billboard`
@@ -24,16 +28,22 @@ contract Shouter is ERC721, IShouter {
 
     constructor(
         uint256 threshold,
-        address collector
+        address collector,
+        address trustedForwarder,
+        address relayHubAddr,
+        address paymasterAddr
     ) ERC721("Shouter", "Shouter") {
         balanceThreshold = threshold;
         balanceCollector = payable(collector);
+        _setTrustedForwarder(trustedForwarder);
+        relayHub = IRelayHub(relayHubAddr);
+        paymaster = paymasterAddr;
     }
 
     function occupyBillboard(
         Billboard calldata billboard
     ) external payable override returns (uint256 tokenId) {
-        uint256 balance = address(this).balance;
+        uint256 balance = relayHub.balanceOf(paymaster);
         if (balance > balanceThreshold) {
             revert OccupyNotOpen();
         }
@@ -45,26 +55,27 @@ contract Shouter is ERC721, IShouter {
         tokenId = tokenIdCounter.current();
         billboardOf[tokenId] = billboard;
         balanceCollector.transfer(balance);
-        payable(address(this)).transfer(msg.value);
 
-        emit OccupyBillboard(msg.sender, tokenId);
+        relayHub.withdraw(balanceCollector, balance);
+        relayHub.depositFor{value: msg.value}(paymaster);
+
+        emit OccupyBillboard(_msgSender(), tokenId);
     }
 
     function commitComment(string memory content) external override {
         uint256 tokenId = tokenIdCounter.current();
-        uint256 lastCommentBillboard = lastCommentBillboardOf[msg.sender];
+        uint256 lastCommentBillboard = lastCommentBillboardOf[_msgSender()];
         if (lastCommentBillboard == tokenId) {
             revert AlreadyCommented();
         }
-        // TODO: GSN or Paymaster
         Billboard storage billboard = billboardOf[tokenId];
         Comment memory comment = Comment({
-            commenter: msg.sender,
+            commenter: _msgSender(),
             content: content
         });
         billboard.comments.push(comment);
 
-        emit CommitComment(msg.sender, content);
+        emit CommitComment(_msgSender(), content);
     }
 
     function getComments(
@@ -116,6 +127,26 @@ contract Shouter is ERC721, IShouter {
         }
         res = string.concat(res, "]}");
         return res;
+    }
+
+    function _msgSender()
+        internal
+        view
+        virtual
+        override(Context, ERC2771Recipient)
+        returns (address)
+    {
+        return ERC2771Recipient._msgSender();
+    }
+
+    function _msgData()
+        internal
+        view
+        virtual
+        override(Context, ERC2771Recipient)
+        returns (bytes calldata)
+    {
+        return ERC2771Recipient._msgData();
     }
 
     function toString(address x) internal pure returns (string memory) {

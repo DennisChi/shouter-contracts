@@ -5,6 +5,7 @@
     "hardhat": "^2.17.4"
   },
   "dependencies": {
+    "@opengsn/contracts": "^3.0.0-beta.6",
     "@openzeppelin/contracts": "^4.9.3"
   }
 }
